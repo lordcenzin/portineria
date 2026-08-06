@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portineria Smart</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 15px; margin: 0; background: #f4f4f9; }
+    h2, h3 { color: #333; margin-top: 0; }
+    .card { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); margin-bottom: 15px; }
+    video { width: 100%; max-height: 250px; border-radius: 8px; background: #000; object-fit: cover; }
+    button { width: 100%; padding: 12px; background: #25D366; color: white; border: none; border-radius: 6px; font-weight: bold; font-size: 16px; margin-top: 8px; cursor: pointer; }
+    button.secondary { background: #007bff; }
+    input { width: 95%; padding: 8px; margin: 4px 0 10px 0; border: 1px solid #ccc; border-radius: 4px; }
+    .result { font-weight: bold; color: #007bff; margin-top: 10px; }
+  </style>
+</head>
+<body>
+
+  <h2>📦 Portineria Smart</h2>
+
+  <!-- SEZIONE 1: SCANNER FOTOCAMERA -->
+  <div class="card">
+    <h3>1. Inquadra Destinatario</h3>
+    <video id="video" autoplay playsinline></video>
+    <button class="secondary" onclick="scansionaBusta()">📷 Scansiona Busta</button>
+    <div id="status"></div>
+    <div id="ocrResult" class="result"></div>
+  </div>
+
+  <!-- SEZIONE 2: ESITO E INVIO WHATSAPP -->
+  <div class="card" id="actionCard" style="display:none;">
+    <h3>2. Condomino Trovato</h3>
+    <p><strong>Nome:</strong> <span id="matchedName">-</span></p>
+    <p><strong>Interno:</strong> <span id="matchedInterno">-</span></p>
+    <button onclick="inviaWhatsApp()">💬 Avvisa su WhatsApp</button>
+  </div>
+
+  <!-- SEZIONE 3: GESTIONE RUBRICA LOCALE -->
+  <div class="card">
+    <h3>📖 Rubrica Condomini (Aggiungi)</h3>
+    <input type="text" id="nome" placeholder="Nome e Cognome (es. Mario Rossi)">
+    <input type="text" id="interno" placeholder="Interno / Scala (es. Int. 4B)">
+    <input type="tel" id="telefono" placeholder="Cellulare con prefisso (es. 393331234567)">
+    <button class="secondary" onclick="salvaCondomino()">➕ Salva in Rubrica</button>
+    <div id="rubricaList" style="margin-top: 10px; font-size: 14px;"></div>
+  </div>
+
+  <script>
+    let rubrica = JSON.parse(localStorage.getItem('rubrica_condomini')) || [];
+    let selectedCondomino = null;
+
+    // Avvia la Fotocamera dello smartphone
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } })
+      .then(stream => { document.getElementById('video').srcObject = stream; })
+      .catch(err => { alert("Errore accesso fotocamera: " + err); });
+
+    function salvaCondomino() {
+      const nome = document.getElementById('nome').value.trim();
+      const interno = document.getElementById('interno').value.trim();
+      const telefono = document.getElementById('telefono').value.trim();
+
+      if (!nome || !telefono) return alert("Inserisci almeno Nome e Telefono!");
+
+      rubrica.push({ nome, interno, telefono });
+      localStorage.setItem('rubrica_condomini', JSON.stringify(rubrica));
+      
+      document.getElementById('nome').value = '';
+      document.getElementById('interno').value = '';
+      document.getElementById('telefono').value = '';
+      mostraRubrica();
+    }
+
+    function mostraRubrica() {
+      const list = document.getElementById('rubricaList');
+      list.innerHTML = '<b>Condomini Registrati:</b><br>' + 
+        rubrica.map(c => `• ${c.nome} (${c.interno}) - ${c.telefono}`).join('<br>');
+    }
+
+    // Scansione Busta e Riconoscimento Testo (OCR)
+    async function scansionaBusta() {
+      const video = document.getElementById('video');
+      const status = document.getElementById('status');
+      const ocrResult = document.getElementById('ocrResult');
+      
+      status.innerText = "⏳ Lettura testo in corso...";
+      ocrResult.innerText = "";
+
+      // Cattura frame da video
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+
+      // Esegue OCR con Tesseract.js (On-Device)
+      const worker = await Tesseract.createWorker('ita');
+      const ret = await worker.recognize(canvas);
+      await worker.terminate();
+
+      const testoLetto = ret.data.text.toLowerCase();
+      status.innerText = "";
+      ocrResult.innerText = "Testo Rilevato: " + ret.data.text.substring(0, 50) + "...";
+
+      // Cerca il nome letto dentro la rubrica
+      selectedCondomino = rubrica.find(c => testoLetto.includes(c.nome.toLowerCase()));
+
+      if (selectedCondomino) {
+        document.getElementById('matchedName').innerText = selectedCondomino.nome;
+        document.getElementById('matchedInterno').innerText = selectedCondomino.interno;
+        document.getElementById('actionCard').style.display = 'block';
+      } else {
+        alert("Nessun condomino associato al testo rilevato sulla busta.");
+        document.getElementById('actionCard').style.display = 'none';
+      }
+    }
+
+    // Genera Deep Link WhatsApp
+    function inviaWhatsApp() {
+      if (!selectedCondomino) return;
+      const testoMsg = `Gentile ${selectedCondomino.nome}, le comunichiamo che è arrivata della corrispondenza/pacco per lei in portineria (${selectedCondomino.interno}).`;
+      const url = `https://wa.me/${selectedCondomino.telefono}?text=${encodeURIComponent(testoMsg)}`;
+      window.open(url, '_blank');
+    }
+
+    mostraRubrica();
+  </script>
+</body>
+</html>
