@@ -96,7 +96,7 @@
       }
     }
 
-    // Scatto foto con RITAGLIO dell'area del mirino
+    // Scatto foto con RITAGLIO dell'area del mirino e aumento del contrasto per OCR perfetto
     async function catturaELeggi() {
       const video = document.getElementById('video');
       const canvas = document.getElementById('canvas');
@@ -110,9 +110,9 @@
       status.innerText = "🔍 Lettura in corso...";
       debug.style.display = "none";
 
-      // Calcola il ritaglio esatto corrispondente al mirino (area centrale 90% x 30%)
+      // Mirino leggermente più ampio per facilitare l'inquadratura (90% x 45%)
       const cropWidth = video.videoWidth * 0.9;
-      const cropHeight = video.videoHeight * 0.3;
+      const cropHeight = video.videoHeight * 0.45;
       const cropX = (video.videoWidth - cropWidth) / 2;
       const cropY = (video.videoHeight - cropHeight) / 2;
 
@@ -120,8 +120,21 @@
       canvas.height = cropHeight;
       const ctx = canvas.getContext('2d');
       
-      // Disegna solo la porzione ritagliata
+      // Ritaglio dell'area del mirino
       ctx.drawImage(video, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+
+      // --- FILTRO ALTO CONTRASTO PER RENDERE IL TESTO PIÙ NITIDO ---
+      const imgData = ctx.getImageData(0, 0, cropWidth, cropHeight);
+      const data = imgData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const threshold = avg > 120 ? 255 : 0;
+        data[i] = threshold;     // Red
+        data[i + 1] = threshold; // Green
+        data[i + 2] = threshold; // Blue
+      }
+      ctx.putImageData(imgData, 0, 0);
+      // -------------------------------------------------------------
 
       try {
         if (!worker) await initOCR();
