@@ -3,32 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Portineria Smart (v4)</title>
+  <title>Portineria Smart</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; padding: 15px; margin: 0; background: #f4f4f9; color: #333; }
     h2, h3 { margin-top: 0; color: #111; }
     .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
     
-    /* Contenitore Fotocamera Compatto - Ridimensionato al 70% */
-    .camera-container {
-      display: flex;
-      width: 100%;
-      justify-content: center;
-      margin: 10px 0;
-    }
+    .camera-container { width: 100%; margin: 10px 0; }
     .camera-box {
       position: relative;
-      width: 100%; /* Dimensione ridotta */
-      aspect-ratio: 4/3; /* Proporzione fissa e più contenuta */
+      width: 100%;
+      aspect-ratio: 16 / 7;
       border-radius: 10px;
       background: #000;
       overflow: hidden;
       box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
     }
-    video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    video, img#freezeView { width: 100%; height: 100%; object-fit: cover; display: block; }
     
-    /* Reticolo di scansione centrale più piccolo */
     .scan-reticle {
       position: absolute;
       top: 50%; left: 50%;
@@ -40,41 +33,49 @@
       pointer-events: none;
     }
 
-    button { width: 100%; padding: 15px; background: #25D366; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; transition: background 0.2s; }
+    .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+    button { flex: 1; padding: 14px; background: #25D366; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 15px; cursor: pointer; }
     button.secondary { background: #007bff; }
+    button.danger { background: #dc3545; }
     button:disabled { background: #ccc; cursor: not-allowed; }
-    button:active { opacity: 0.8; }
     
     input { width: 100%; padding: 10px; margin: 6px 0 12px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
     .status-msg { font-size: 14px; color: #666; margin-top: 10px; font-style: italic; text-align: center; }
     .debug-text { background: #eee; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 8px; max-height: 80px; overflow-y: auto; }
-    
-    /* Box Esito con Pulsante WhatsApp */
-    #actionCard { border: 2px solid #25D366; }
   </style>
 </head>
 <body>
 
-  <h2>📦 Portineria Smart <span style="font-size:12px; color:#666;">v4 (Vista Ridotta)</span></h2>
+  <h2>📦 Portineria Smart</h2>
 
   <div class="card">
-    <h3>1. Inquadra l'Etichetta</h3>
-    <p style="font-size: 14px; color: #555; margin-bottom: 5px;">Centra il destinatario nel rettangolo verde:</p>
+    <h3>1. Inquadra e Congela</h3>
     
     <div class="camera-container">
       <div class="camera-box">
+        <!-- Video Live -->
         <video id="video" autoplay playsinline muted></video>
-        <div class="scan-reticle"></div>
+        <!-- Anteprima Immagine Congelata (nascosta di base) -->
+        <img id="freezeView" style="display:none;" />
+        <div id="reticle" class="scan-reticle"></div>
       </div>
     </div>
     
-    <button id="btnScan" onclick="catturaELeggi()">📷 Scansiona Destinatario</button>
+    <!-- STEP 1: Scatto -->
+    <button id="btnFreeze" onclick="congelaFrame()">📸 Scatta e Blocca Frame</button>
+
+    <!-- STEP 2: Conferma/Annulla (Nascosto all'inizio) -->
+    <div id="confirmBlock" class="btn-group" style="display:none;">
+      <button class="danger" onclick="riavviaVideo()">🔄 Sfocata? Riprova</button>
+      <button onclick="inviaAOCR()">✅ Nitida! Analizza</button>
+    </div>
+
     <div id="status" class="status-msg">Caricamento fotocamera...</div>
     <div id="debug" class="debug-text" style="display:none;"></div>
   </div>
 
-  <!-- SEZIONE ESITO / WHATSAPP -->
-  <div class="card" id="actionCard" style="display:none;">
+  <!-- RESULT CARD -->
+  <div class="card" id="actionCard" style="display:none; border: 2px solid #25D366;">
     <h3 style="color: #25D366;">✅ Condomino Identificato</h3>
     <p style="font-size: 20px; margin: 5px 0;"><strong>Destinatario:</strong> <span id="matchedName">-</span></p>
     <p style="font-size: 16px; color: #555; margin: 5px 0;">Interno: <span id="matchedInterno">-</span></p>
@@ -102,6 +103,7 @@
     let rubrica = JSON.parse(localStorage.getItem('rubrica_condomini')) || [];
     let selectedCondomino = null;
     let worker = null;
+    let croppedCanvas = null; // Memorizza il ritaglio da inviare all'OCR
 
     async function initCamera() {
       const status = document.getElementById('status');
@@ -111,58 +113,89 @@
         });
         document.getElementById('video').srcObject = stream;
       } catch (err) {
-        status.innerText = "❌ Errore fotocamera: controlla i permessi.";
+        status.innerText = "❌ Errore fotocamera.";
       }
     }
 
     async function initOCR() {
       const status = document.getElementById('status');
       try {
-        status.innerText = "⏳ Inizializzazione motore lettura...";
+        status.innerText = "⏳ Inizializzazione motore OCR...";
         worker = await Tesseract.createWorker('ita');
-        status.innerText = "🟢 Pronto! Inquadra e premi 'Scansiona'.";
+        status.innerText = "🟢 Inquadra il destinatario e premi 'Scatta'.";
       } catch (e) {
         status.innerText = "⚠️ Errore caricamento OCR.";
       }
     }
 
-    async function catturaELeggi() {
+    // STEP 1: Scatta la foto e mostra il fermo immagine
+    function congelaFrame() {
       const video = document.getElementById('video');
+      const freezeView = document.getElementById('freezeView');
       const canvas = document.getElementById('canvas');
       const status = document.getElementById('status');
-      const debug = document.getElementById('debug');
-      const btnScan = document.getElementById('btnScan');
-
+      
       if (!video.videoWidth) return alert("Fotocamera non pronta!");
 
-      btnScan.disabled = true;
-      status.innerText = "🔍 Lettura in corso...";
-      debug.style.display = "none";
-      document.getElementById('actionCard').style.display = 'none';
-
-      // Imposta il canvas alla risoluzione nativa
+      // 1. Disegna l'intero video su un canvas nascosto
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, 0, 0);
 
-      // --- Ritaglio dell'area del mirino centrale ---
-      const cropW = canvas.width * 0.6;
-      const cropH = canvas.height * 0.6;
+      // 2. Crea il ritaglio preciso dell'area del mirino (80% W, 70% H)
+      const cropW = canvas.width * 0.8;
+      const cropH = canvas.height * 0.7;
       const cropX = (canvas.width - cropW) / 2;
       const cropY = (canvas.height - cropH) / 2;
 
-      const tempCanvas = document.createElement('canvas');
-      tempCanvas.width = cropW;
-      tempCanvas.height = cropH;
-      const tempCtx = tempCanvas.getContext('2d');
-      tempCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-      // ---------------------------------------------
+      croppedCanvas = document.createElement('canvas');
+      croppedCanvas.width = cropW;
+      croppedCanvas.height = cropH;
+      const cropCtx = croppedCanvas.getContext('2d');
+      cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+      // 3. Mostra il fermo immagine del ritaglio
+      freezeView.src = croppedCanvas.toDataURL('image/jpeg');
+      video.style.display = 'none';
+      freezeView.style.display = 'block';
+      document.getElementById('reticle').style.display = 'none'; // nasconde il mirino sopra l'immagine fissa
+
+      // 4. Cambia la pulsantiera
+      document.getElementById('btnFreeze').style.display = 'none';
+      document.getElementById('confirmBlock').style.display = 'flex';
+      
+      status.innerText = "🔍 Verifica l'anteprima: se è nitida premi 'Analizza'.";
+    }
+
+    // Ritorna al flusso video se l'immagine è sfocata
+    function riavviaVideo() {
+      document.getElementById('video').style.display = 'block';
+      document.getElementById('freezeView').style.display = 'none';
+      document.getElementById('reticle').style.display = 'block';
+
+      document.getElementById('btnFreeze').style.display = 'block';
+      document.getElementById('confirmBlock').style.display = 'none';
+      document.getElementById('actionCard').style.display = 'none';
+      document.getElementById('debug').style.display = 'none';
+
+      document.getElementById('status').innerText = "🟢 Pronto per un nuovo scatto.";
+    }
+
+    // STEP 2: Conferma e invio a Tesseract
+    async function inviaAOCR() {
+      const status = document.getElementById('status');
+      const debug = document.getElementById('debug');
+      
+      if (!croppedCanvas) return;
+
+      status.innerText = "⏳ Lettura OCR in corso...";
+      debug.style.display = "none";
 
       try {
         if (!worker) await initOCR();
 
-        const ret = await worker.recognize(tempCanvas); // Analizziamo solo il ritaglio
+        const ret = await worker.recognize(croppedCanvas);
         const testoLetto = ret.data.text.trim();
 
         debug.style.display = "block";
@@ -171,19 +204,15 @@
         cercaInRubrica(testoLetto);
       } catch (err) {
         status.innerText = "❌ Errore durante la scansione.";
-      } finally {
-        btnScan.disabled = false;
       }
     }
 
     function cercaInRubrica(testoLetto) {
       const status = document.getElementById('status');
-      // Pulisce il testo e lo normalizza
       const testoClean = testoLetto.toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, " ");
 
       selectedCondomino = null;
 
-      // Cerca corrispondenza su Cognome+Nome o Cognome
       for (let c of rubrica) {
         const cognome = c.cognome.toLowerCase().trim();
         const nome = c.nome.toLowerCase().trim();
@@ -191,7 +220,6 @@
         const cognomeNome = `${cognome} ${nome}`;
         const nomeCognome = `${nome} ${cognome}`;
 
-        // Controlla se il testo contiene la combinazione intera o almeno il cognome (se > 2 lettere)
         if (testoClean.includes(cognomeNome) || testoClean.includes(nomeCognome) || (cognome.length > 2 && testoClean.includes(cognome))) {
           selectedCondomino = c;
           break;
@@ -203,11 +231,9 @@
         document.getElementById('matchedName').innerText = `${selectedCondomino.cognome.toUpperCase()} ${selectedCondomino.nome}`;
         document.getElementById('matchedInterno').innerText = selectedCondomino.interno;
         document.getElementById('actionCard').style.display = 'block';
-        
-        // Scorri per mostrare il risultato
         document.getElementById('actionCard').scrollIntoView({ behavior: 'smooth' });
       } else {
-        status.innerText = "❓ Nessuna corrispondenza trovata. Riprova scansionando chiaramente il cognome.";
+        status.innerText = "❓ Nessuna corrispondenza trovata in rubrica.";
         document.getElementById('actionCard').style.display = 'none';
       }
     }
@@ -220,14 +246,12 @@
 
       if (!cognome || !telefono) return alert("Inserisci almeno Cognome e Telefono!");
       
-      // Formatta telefono se manca il prefisso 39
       if (!telefono.startsWith('+') && !telefono.startsWith('39')) {
         telefono = '39' + telefono;
       }
-      telefono = telefono.replace('+', ''); // Rimuovi eventuale +
+      telefono = telefono.replace('+', '');
 
       rubrica.push({ cognome, nome, interno, telefono });
-      // Salva in ordine alfabetico per cognome
       rubrica.sort((a,b) => a.cognome.localeCompare(b.cognome));
       
       localStorage.setItem('rubrica_condomini', JSON.stringify(rubrica));
@@ -257,7 +281,7 @@
         rubrica.map((c, i) => `
           <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px; padding: 6px 0; border-bottom: 1px solid #eee;">
             <span>• <b>${c.cognome.toUpperCase()} ${c.nome}</b> (${c.interno})</span>
-            <button onclick="eliminaCondomino(${i})" style="width:auto; padding:4px 10px; margin:0; background:#dc3545; font-size:12px; font-weight:normal; border-radius:4px;">Elimina</button>
+            <button onclick="eliminaCondomino(${i})" style="width:auto; padding:4px 10px; margin:0; background:#dc3545; font-size:12px; font-weight:normal;">Elimina</button>
           </div>
         `).join('');
     }
