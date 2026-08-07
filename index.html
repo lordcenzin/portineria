@@ -3,56 +3,96 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Portineria Smart</title>
+  <title>Portineria Smart (v4)</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; padding: 15px; margin: 0; background: #f4f4f9; color: #333; }
     h2, h3 { margin-top: 0; color: #111; }
     .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); margin-bottom: 15px; }
     
-    .camera-box { position: relative; width: 100%; border-radius: 8px; background: #000; overflow: hidden; }
-    video { width: 100%; height: auto; display: block; }
+    /* Contenitore Fotocamera Compatto - Ridimensionato al 70% */
+    .camera-container {
+      display: flex;
+      justify-content: center;
+      margin: 10px 0;
+    }
+    .camera-box {
+      position: relative;
+      width: 70%; /* Dimensione ridotta */
+      aspect-ratio: 4/3; /* Proporzione fissa e più contenuta */
+      border-radius: 10px;
+      background: #000;
+      overflow: hidden;
+      box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+    }
+    video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    
+    /* Reticolo di scansione centrale più piccolo */
+    .scan-reticle {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60%; height: 60%;
+      border: 3px solid #25D366;
+      border-radius: 8px;
+      box-shadow: 0 0 0 999px rgba(0, 0, 0, 0.4);
+      pointer-events: none;
+    }
 
-    button { width: 100%; padding: 15px; background: #25D366; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; }
+    button { width: 100%; padding: 15px; background: #25D366; color: white; border: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin-top: 10px; cursor: pointer; transition: background 0.2s; }
     button.secondary { background: #007bff; }
     button:disabled { background: #ccc; cursor: not-allowed; }
+    button:active { opacity: 0.8; }
     
     input { width: 100%; padding: 10px; margin: 6px 0 12px 0; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; font-size: 15px; }
     .status-msg { font-size: 14px; color: #666; margin-top: 10px; font-style: italic; text-align: center; }
     .debug-text { background: #eee; padding: 8px; border-radius: 4px; font-family: monospace; font-size: 12px; word-break: break-all; margin-top: 8px; max-height: 80px; overflow-y: auto; }
+    
+    /* Box Esito con Pulsante WhatsApp */
+    #actionCard { border: 2px solid #25D366; }
   </style>
 </head>
 <body>
 
-  <h2>📦 Portineria Smart</h2>
+  <h2>📦 Portineria Smart <span style="font-size:12px; color:#666;">v4 (Vista Ridotta)</span></h2>
 
   <div class="card">
     <h3>1. Inquadra l'Etichetta</h3>
-    <div class="camera-box">
-      <video id="video" autoplay playsinline muted></video>
+    <p style="font-size: 14px; color: #555; margin-bottom: 5px;">Centra il destinatario nel rettangolo verde:</p>
+    
+    <div class="camera-container">
+      <div class="camera-box">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="scan-reticle"></div>
+      </div>
     </div>
+    
     <button id="btnScan" onclick="catturaELeggi()">📷 Scansiona Destinatario</button>
     <div id="status" class="status-msg">Caricamento fotocamera...</div>
     <div id="debug" class="debug-text" style="display:none;"></div>
   </div>
 
-  <div class="card" id="actionCard" style="display:none; border: 2px solid #25D366;">
+  <!-- SEZIONE ESITO / WHATSAPP -->
+  <div class="card" id="actionCard" style="display:none;">
     <h3 style="color: #25D366;">✅ Condomino Identificato</h3>
     <p style="font-size: 20px; margin: 5px 0;"><strong>Destinatario:</strong> <span id="matchedName">-</span></p>
-    <p style="font-size: 16px; color: #555; margin: 5px 0;"><strong>Interno:</strong> <span id="matchedInterno">-</span></p>
+    <p style="font-size: 16px; color: #555; margin: 5px 0;">Interno: <span id="matchedInterno">-</span></p>
     <button onclick="inviaWhatsApp()">💬 Notifica via WhatsApp</button>
   </div>
 
+  <!-- RUBRICA -->
   <div class="card">
     <h3>📖 Rubrica Condomini</h3>
     <div style="display:flex; gap:8px;">
-      <input type="text" id="cognome" placeholder="Cognome (es. Rossi)">
-      <input type="text" id="nome" placeholder="Nome (es. Mario)">
+      <input type="text" id="cognome" placeholder="Cognome">
+      <input type="text" id="nome" placeholder="Nome">
     </div>
-    <input type="text" id="interno" placeholder="Interno / Scala (es. Int. 4B)">
-    <input type="tel" id="telefono" placeholder="Cellulare (es. 393331234567)">
+    <div style="display:flex; gap:8px;">
+        <input type="text" id="interno" placeholder="Int. (es. 4B)" style="width:30%;">
+        <input type="tel" id="telefono" placeholder="393331234567" style="width:70%;">
+    </div>
     <button class="secondary" onclick="salvaCondomino()">➕ Salva in Rubrica</button>
-    <div id="rubricaList" style="margin-top: 15px; font-size: 14px;"></div>
+    <div id="rubricaList" style="margin-top: 15px; font-size: 14px; border-top: 1px solid #eee; padding-top: 10px;"></div>
   </div>
 
   <canvas id="canvas" style="display:none;"></canvas>
@@ -63,13 +103,14 @@
     let worker = null;
 
     async function initCamera() {
+      const status = document.getElementById('status');
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
           video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } } 
         });
         document.getElementById('video').srcObject = stream;
       } catch (err) {
-        document.getElementById('status').innerText = "❌ Errore fotocamera.";
+        status.innerText = "❌ Errore fotocamera: controlla i permessi.";
       }
     }
 
@@ -96,17 +137,31 @@
       btnScan.disabled = true;
       status.innerText = "🔍 Lettura in corso...";
       debug.style.display = "none";
+      document.getElementById('actionCard').style.display = 'none';
 
-      // Usiamo la risoluzione nativa completa senza ritagli forzati
+      // Imposta il canvas alla risoluzione nativa
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0);
+
+      // --- Ritaglio dell'area del mirino centrale ---
+      const cropW = canvas.width * 0.6;
+      const cropH = canvas.height * 0.6;
+      const cropX = (canvas.width - cropW) / 2;
+      const cropY = (canvas.height - cropH) / 2;
+
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = cropW;
+      tempCanvas.height = cropH;
+      const tempCtx = tempCanvas.getContext('2d');
+      tempCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      // ---------------------------------------------
 
       try {
         if (!worker) await initOCR();
 
-        const ret = await worker.recognize(canvas);
+        const ret = await worker.recognize(tempCanvas); // Analizziamo solo il ritaglio
         const testoLetto = ret.data.text.trim();
 
         debug.style.display = "block";
@@ -122,10 +177,12 @@
 
     function cercaInRubrica(testoLetto) {
       const status = document.getElementById('status');
+      // Pulisce il testo e lo normalizza
       const testoClean = testoLetto.toLowerCase().replace(/[^a-z0-9àèéìòù ]/g, " ");
 
       selectedCondomino = null;
 
+      // Cerca corrispondenza su Cognome+Nome o Cognome
       for (let c of rubrica) {
         const cognome = c.cognome.toLowerCase().trim();
         const nome = c.nome.toLowerCase().trim();
@@ -133,6 +190,7 @@
         const cognomeNome = `${cognome} ${nome}`;
         const nomeCognome = `${nome} ${cognome}`;
 
+        // Controlla se il testo contiene la combinazione intera o almeno il cognome (se > 2 lettere)
         if (testoClean.includes(cognomeNome) || testoClean.includes(nomeCognome) || (cognome.length > 2 && testoClean.includes(cognome))) {
           selectedCondomino = c;
           break;
@@ -144,8 +202,11 @@
         document.getElementById('matchedName').innerText = `${selectedCondomino.cognome.toUpperCase()} ${selectedCondomino.nome}`;
         document.getElementById('matchedInterno').innerText = selectedCondomino.interno;
         document.getElementById('actionCard').style.display = 'block';
+        
+        // Scorri per mostrare il risultato
+        document.getElementById('actionCard').scrollIntoView({ behavior: 'smooth' });
       } else {
-        status.innerText = "❓ Nessuna corrispondenza. Assicurati che il nome sia ben illuminato e nitido.";
+        status.innerText = "❓ Nessuna corrispondenza trovata. Riprova scansionando chiaramente il cognome.";
         document.getElementById('actionCard').style.display = 'none';
       }
     }
@@ -158,12 +219,16 @@
 
       if (!cognome || !telefono) return alert("Inserisci almeno Cognome e Telefono!");
       
+      // Formatta telefono se manca il prefisso 39
       if (!telefono.startsWith('+') && !telefono.startsWith('39')) {
         telefono = '39' + telefono;
       }
-      telefono = telefono.replace('+', '');
+      telefono = telefono.replace('+', ''); // Rimuovi eventuale +
 
       rubrica.push({ cognome, nome, interno, telefono });
+      // Salva in ordine alfabetico per cognome
+      rubrica.sort((a,b) => a.cognome.localeCompare(b.cognome));
+      
       localStorage.setItem('rubrica_condomini', JSON.stringify(rubrica));
       
       document.getElementById('cognome').value = '';
@@ -174,22 +239,24 @@
     }
 
     function eliminaCondomino(index) {
-      rubrica.splice(index, 1);
-      localStorage.setItem('rubrica_condomini', JSON.stringify(rubrica));
-      mostraRubrica();
+      if(confirm("Eliminare questo condomino?")) {
+        rubrica.splice(index, 1);
+        localStorage.setItem('rubrica_condomini', JSON.stringify(rubrica));
+        mostraRubrica();
+      }
     }
 
     function mostraRubrica() {
       const list = document.getElementById('rubricaList');
       if (rubrica.length === 0) {
-        list.innerHTML = "<i>Nessun condomino salvato.</i>";
+        list.innerHTML = "<i>Nessun condomino salvato in rubrica.</i>";
         return;
       }
-      list.innerHTML = '<b>Rubrica Condomini (' + rubrica.length + '):</b><br>' + 
+      list.innerHTML = '<b>Rubrica Attiva (' + rubrica.length + '):</b><br>' + 
         rubrica.map((c, i) => `
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px; padding: 4px 0; border-bottom: 1px solid #eee;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-top:5px; padding: 6px 0; border-bottom: 1px solid #eee;">
             <span>• <b>${c.cognome.toUpperCase()} ${c.nome}</b> (${c.interno})</span>
-            <button onclick="eliminaCondomino(${i})" style="width:auto; padding:2px 8px; margin:0; background:#dc3545; font-size:12px;">X</button>
+            <button onclick="eliminaCondomino(${i})" style="width:auto; padding:4px 10px; margin:0; background:#dc3545; font-size:12px; font-weight:normal; border-radius:4px;">Elimina</button>
           </div>
         `).join('');
     }
